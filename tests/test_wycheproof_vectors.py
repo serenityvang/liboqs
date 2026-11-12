@@ -3,10 +3,12 @@
 import json
 import subprocess
 import sys
+import time
 from urllib.parse import urljoin
 from collections import namedtuple
 
 import pytest
+from requests.exceptions import RequestException
 import helpers
 
 WYCHEPROOF_COMMIT = "45d916899992c5e42dba75106104ca8ce7ff8370"
@@ -28,6 +30,22 @@ ML_DSA_PARAMS = {
     "ML-DSA-87": MlDsaParam(2592, 4896),
 }
 
+def _cached_requests_get_with_retries(url, retries=3, backoff=1.0):
+    for attempt in range(retries):
+        try:
+            resp = helpers.cached_requests_get(url)
+            resp.raise_for_status()
+            return resp
+        except RequestException as error:
+            if attempt == retries - 1:
+                pytest.skip(
+                    f"Wycheproof download failed after {retries} "
+                    f"attempts for {url}: {error}"
+                )
+            delay = backoff * (2 ** attempt)
+            print(f"Download failed: {error}. Retrying in {delay} seconds...")
+            time.sleep(delay)
+
 def fetch_wycheproof_kem_test_cases(kem_name, suffix, valid_types):
     """
     Fetches Wycheproof vectors and returns a list of individual test cases.
@@ -36,8 +54,7 @@ def fetch_wycheproof_kem_test_cases(kem_name, suffix, valid_types):
     alg_id = kem_name.lower().replace("ml-kem-", "mlkem_")
     url = urljoin(WYCHE_ROOT, f"{alg_id}_{suffix}.json")
     
-    resp = helpers.cached_requests_get(url)
-    resp.raise_for_status()
+    resp = _cached_requests_get_with_retries(url)
 
     data = json.loads(resp.content)
     test_cases = []
@@ -59,8 +76,7 @@ def fetch_wycheproof_sig_test_cases(sig_name, suffix, valid_types):
     alg_id = sig_name.lower().replace("ml-dsa-", "mldsa_")
     url = urljoin(WYCHE_ROOT, f"{alg_id}_{suffix}.json")
     
-    resp = helpers.cached_requests_get(url)
-    resp.raise_for_status()
+    resp = _cached_requests_get_with_retries(url)
 
     data = json.loads(resp.content)
     test_cases = []
@@ -376,5 +392,3 @@ def test_wycheproof_vec_sig_sign(sig_name):
 
 if __name__ == "__main__":
     pytest.main(sys.argv)
-
-
